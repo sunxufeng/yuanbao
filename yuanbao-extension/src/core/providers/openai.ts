@@ -156,7 +156,8 @@ export class OpenAICompatibleProvider extends BaseProvider {
           stream: false,
         }),
       });
-      return res.status < 500;
+      // 401/403/404 都说明配置不正确，应视为不通
+      return res.ok || res.status === 429;
     } catch {
       return false;
     }

@@ -47,7 +47,7 @@ async function reloadManager() {
 
 /**
  * 安装 / 更新时：
- *  - 首次写入预置 Provider（getProviders 内部已处理“空则注入”）。
+ *  - 首次启动不预置 Provider，getProviders 内部写入空数组，用户需在选项页自行添加。
  *  - Chrome 下把工具栏图标点击行为设为“打开侧边栏”（若支持 sidePanel）。
  *  - Firefox 不支持 sidePanel，自动跳过，回退到 popup（default_popup）。
  * 全部用能力探测 + safeChrome 包裹，避免“报错但不影响使用”。

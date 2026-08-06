@@ -12,6 +12,24 @@ import { YuanBaoProvider } from './providers/yuanbao';
 import { OpenAICompatibleProvider } from './providers/openai';
 import { CustomProvider } from './providers/custom';
 
+/** 把底层 HTTP 错误包装成用户能看懂的提示 */
+function formatProviderError(raw: string, providerName: string): string {
+  const s = raw.trim() || '未知错误';
+  let hint = '';
+  if (/\b401\b|Unauthorized|invalid_api_key|Incorrect API key/i.test(s)) {
+    hint = '请检查 API Key 是否正确，或该 Key 是否有调用此模型的权限。';
+  } else if (/\b404\b|Not Found/i.test(s)) {
+    hint = '请检查 Base URL 与模型 ID 是否匹配。';
+  } else if (/\b429\b|Too Many Requests|rate limit/i.test(s)) {
+    hint = '请求过于频繁或额度不足，请稍后重试。';
+  } else if (/\b50[0-9]\b|ETIMEDOUT|ECONNREFUSED|NetworkError|Failed to fetch/i.test(s)) {
+    hint = '服务端暂时不可用或网络受限，请检查网络与代理设置。';
+  } else if (/CORS|cross-origin|blocked by/i.test(s)) {
+    hint = '请求被浏览器拦截。请确认 Base URL 支持跨域，或改用 HTTPS 端点。';
+  }
+  return `[${providerName}] ${s}${hint ? '\n' + hint : ''}`;
+}
+
 function instantiate(cfg: ProviderConfig): ModelProvider {
   switch (cfg.type) {
     case 'yuanbao':
@@ -57,106 +75,59 @@ export class ProviderManager {
     return null;
   }
 
-  /** 默认回退 Provider（优先内置 yuanbao，否则第一个启用的 openai-compatible） */
-  private fallbackFor(excludeId: string): { provider: ModelProvider; modelId: string } | null {
-    const yuanbao = this.providers.find((p) => p.type === 'yuanbao' && (p as any).id !== excludeId);
-    if (yuanbao) {
-      const m = ((yuanbao as any).cfg?.models ?? [])[0];
-      if (m) return { provider: yuanbao, modelId: m.id };
-    }
-    const alt = this.providers.find((p) => (p as any).id !== excludeId);
-    if (alt) {
-      const m = ((alt as any).cfg?.models ?? [])[0];
-      if (m) return { provider: alt, modelId: m.id };
-    }
-    return null;
-  }
-
-  /** 对话（带一次回退） */
-  async *chatWithFallback(req: ChatRequest): AsyncIterable<ChatChunk> {
+  /** 对话：直接路由到用户选中的模型，出错即停并给出可操作的提示 */
+  async *chat(req: ChatRequest): AsyncIterable<ChatChunk> {
     void track('model_used');
-    const resolved = this.resolve(req.model);
-    if (!resolved) {
-      yield { delta: '', error: `未知模型：${req.model}` };
+    if (!req.model) {
+      yield { delta: '', error: '未选择模型。请先在设置中添加并启用一个 Provider，然后选择默认模型。' };
       yield { delta: '', done: true };
       return;
     }
-    let errored = false;
+    const resolved = this.resolve(req.model);
+    if (!resolved) {
+      yield { delta: '', error: `未知模型：${req.model}。请检查该模型是否已被禁用或删除。` };
+      yield { delta: '', done: true };
+      return;
+    }
     for await (const c of resolved.provider.chat(req)) {
       if (c.error) {
-        errored = true;
-        yield { delta: '', error: c.error };
+        yield { delta: '', error: formatProviderError(c.error, resolved.provider.name) };
         break;
       }
       yield c;
     }
-    if (errored) {
-      const fb = this.fallbackFor((resolved.provider as any).id);
-      if (fb) {
-        void track('model_fallback');
-        yield { delta: `\n\n[当前模型不可用，已回退至 ${fb.provider.name}]\n` };
-        for await (const c of fb.provider.chat({ ...req, model: fb.modelId })) {
-          if (c.error) {
-            yield { delta: '', error: c.error };
-            break;
-          }
-          yield c;
-        }
-      }
-    }
     yield { delta: '', done: true };
   }
 
-  /** 翻译/总结（元宝专用 + 其它模型 prompt 降级） */
+  /** 旧名保留兼容，行为与 chat 相同（不再自动回退） */
+  async *chatWithFallback(req: ChatRequest): AsyncIterable<ChatChunk> {
+    yield* this.chat(req);
+  }
+
+  /** 翻译/总结：统一走 chat + 专用 prompt，出错直接返回格式化错误 */
   async *transform(req: TransformRequest): AsyncIterable<ChatChunk> {
-    const resolved = this.resolve(req.model);
-    if (!resolved) {
-      yield { delta: '', error: `未知模型：${req.model}` };
+    if (!req.model) {
+      yield { delta: '', error: '未选择模型。请先在设置中添加并启用一个 Provider，然后选择默认模型。' };
       yield { delta: '', done: true };
       return;
     }
-    if (resolved.provider.type === 'yuanbao') {
-      yield* this.yuanbaoTransform(req);
+    const resolved = this.resolve(req.model);
+    if (!resolved) {
+      yield { delta: '', error: `未知模型：${req.model}。请检查该模型是否已被禁用或删除。` };
+      yield { delta: '', done: true };
       return;
     }
-    // 降级：chat + 专用 prompt（埋点记录降级次数）
     void track('transform_degraded');
     const prompt =
       req.task === 'translate'
         ? `请将以下内容翻译为${req.targetLang || '中文'}，仅输出译文，不要解释：\n\n${req.text}`
         : `请用简洁的中文总结以下内容，保留关键要点，不要添加额外评论：\n\n${req.text}`;
-    yield* resolved.provider.chat({ model: req.model, messages: [{ role: 'user', content: prompt }], stream: true });
-  }
-
-  private async *yuanbaoTransform(req: TransformRequest): AsyncIterable<ChatChunk> {
-    const provider = this.providers.find((p) => p.type === 'yuanbao') as YuanBaoProvider | undefined;
-    const cfg = this.configs.find((c) => c.type === 'yuanbao');
-    if (!provider || !cfg) {
-      yield { delta: '', error: '未配置元宝 Provider' };
-      yield { delta: '', done: true };
-      return;
-    }
-    const base = (cfg.baseURL || 'https://yuanbao.tencent.com').replace(/\/$/, '');
-    const endpoint = `${base}/api/translate`;
-    try {
-      const res = await fetch(endpoint, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${cfg.apiKey ?? ''}`,
-        },
-        body: JSON.stringify({ model: 'hunyuan-translation', text: req.text, target_lang: req.targetLang || 'zh' }),
-      });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const json = await res.json();
-      yield { delta: json.translation || json.result || '' };
-    } catch {
-      // 元宝翻译不可用时，降级到该模型的 chat 总结/翻译
-      const prompt =
-        req.task === 'translate'
-          ? `请将以下内容翻译为${req.targetLang || '中文'}，仅输出译文：\n\n${req.text}`
-          : `请总结以下内容：\n\n${req.text}`;
-      yield* provider.chat({ model: req.model, messages: [{ role: 'user', content: prompt }], stream: true });
+    for await (const c of resolved.provider.chat({ model: req.model, messages: [{ role: 'user', content: prompt }], stream: true })) {
+      if (c.error) {
+        yield { delta: '', error: formatProviderError(c.error, resolved.provider.name) };
+        break;
+      }
+      yield c;
     }
     yield { delta: '', done: true };
   }

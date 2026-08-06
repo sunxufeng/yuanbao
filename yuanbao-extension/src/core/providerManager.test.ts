@@ -6,7 +6,8 @@ import type { ProviderConfig } from '@/types/model';
 /** 用可控的 fetch 替身构建 OpenAI 兼容 Provider */
 function mockOpenAI(text: string) {
   return vi.fn(async () => {
-    const body = `data: ${JSON.stringify({ choices: [{ delta: { content: text } }] })}\n\ndata: [DONE]\n`;
+    const body = `data: ${JSON.stringify({ choices: [{ delta: { content: text } }] })}
+\ndata: [DONE]\n`;
     return new Response(body, {
       status: 200,
       headers: { 'Content-Type': 'text/event-stream' },
@@ -15,14 +16,12 @@ function mockOpenAI(text: string) {
 }
 
 describe('builtin models', () => {
-  it('包含 yuanbao 与多个常用模型 Provider', () => {
-    expect(BUILTIN_PROVIDERS.some((p) => p.id === 'yuanbao')).toBe(true);
-    expect(BUILTIN_PROVIDERS.some((p) => p.id === 'openai')).toBe(true);
-    expect(BUILTIN_PROVIDERS.some((p) => p.id === 'ollama')).toBe(true);
+  it('默认不预置任何 Provider', () => {
+    expect(BUILTIN_PROVIDERS).toEqual([]);
   });
 });
 
-describe('ProviderManager 路由与回退', () => {
+describe('ProviderManager 路由', () => {
   beforeEach(() => {
     vi.restoreAllMocks();
   });
@@ -41,19 +40,15 @@ describe('ProviderManager 路由与回退', () => {
       },
     ]);
     let out = '';
-    for await (const c of mgr.chatWithFallback({ model: 'gpt-4o', messages: [{ role: 'user', content: 'hi' }] })) {
+    for await (const c of mgr.chat({ model: 'gpt-4o', messages: [{ role: 'user', content: 'hi' }] })) {
       if (c.delta) out += c.delta;
     }
     expect(out).toContain('你好');
   });
 
-  it('不可达模型回退到内置 yuanbao', async () => {
-    const broken = vi.fn(async () => new Response('', { status: 500 }));
-    const yuanbaoFetch = mockOpenAI('兜底回复');
-    vi.stubGlobal('fetch', (input: any) => {
-      const url = String(input);
-      return url.includes('yuanbao') ? yuanbaoFetch() : broken();
-    });
+  it('模型出错时直接返回错误，不再自动回退', async () => {
+    const broken = vi.fn(async () => new Response('Unauthorized', { status: 401 }));
+    vi.stubGlobal('fetch', broken);
     const mgr = fromConfigs([
       {
         id: 'openai',
@@ -73,15 +68,25 @@ describe('ProviderManager 路由与回退', () => {
         models: [{ id: 'yuanbao-hunyuan', label: '混元', providerId: 'yuanbao', capability: ['chat'] }],
       },
     ]);
-    let out = '';
-    for await (const c of mgr.chatWithFallback({ model: 'gpt-4o', messages: [{ role: 'user', content: 'hi' }] })) {
-      if (c.delta) out += c.delta;
+    const chunks: { delta?: string; error?: string }[] = [];
+    for await (const c of mgr.chat({ model: 'gpt-4o', messages: [{ role: 'user', content: 'hi' }] })) {
+      chunks.push({ delta: c.delta, error: c.error });
     }
-    expect(out).toContain('兜底回复');
+    expect(chunks.some((c) => c.error?.includes('401'))).toBe(true);
+    expect(chunks.some((c) => c.delta?.includes('兜底'))).toBe(false);
+  });
+
+  it('未选择模型时给出引导错误', async () => {
+    const mgr = fromConfigs([]);
+    const chunks: { error?: string }[] = [];
+    for await (const c of mgr.chat({ model: '', messages: [{ role: 'user', content: 'hi' }] })) {
+      chunks.push({ error: c.error });
+    }
+    expect(chunks[0]?.error).toContain('未选择模型');
   });
 });
 
-describe('transform 降级（非 yuanbao 模型）', () => {
+describe('transform（非 yuanbao 模型）', () => {
   it('非元宝模型走 chat + 专用 prompt', async () => {
     const fetchMock = mockOpenAI('译文内容');
     vi.stubGlobal('fetch', fetchMock);

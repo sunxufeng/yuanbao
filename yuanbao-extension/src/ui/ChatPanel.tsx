@@ -207,22 +207,49 @@ export function ChatPanel() {
     <div className="flex h-full flex-col bg-white">
       <header className="flex items-center gap-2 border-b border-gray-100 px-3 py-2">
         <span className="text-sm font-semibold text-brand">元宝 AI 助手</span>
-        <select
-          className="ml-auto rounded border border-gray-200 px-2 py-1 text-xs"
-          value={modelId}
-          onChange={(e) => onModelChange(e.target.value)}
+        {models.length > 0 ? (
+          <select
+            className="ml-auto rounded border border-gray-200 px-2 py-1 text-xs"
+            value={modelId}
+            onChange={(e) => onModelChange(e.target.value)}
+          >
+            {models.map((m) => (
+              <option key={m.id} value={m.id}>
+                {m.label}
+              </option>
+            ))}
+          </select>
+        ) : (
+          <span className="ml-auto text-xs text-gray-400">未配置模型</span>
+        )}
+        <button
+          className="rounded border border-gray-200 px-2 py-1 text-xs text-gray-600 hover:bg-gray-50"
+          onClick={() => {
+            try {
+              void chrome.runtime.openOptionsPage();
+            } catch {
+              /* ignore */
+            }
+          }}
+          title="打开设置"
         >
-          {models.map((m) => (
-            <option key={m.id} value={m.id}>
-              {m.label}
-            </option>
-          ))}
-        </select>
+          设置
+        </button>
       </header>
 
       <div ref={scrollRef} className="yb-scroll flex-1 space-y-3 overflow-y-auto px-3 py-3 text-sm">
         {messages.length === 0 && (
-          <div className="mt-10 text-center text-gray-400">选中模型后开始对话，支持多模型 / 自定义模型。</div>
+          <div className="mt-10 px-4 text-center text-gray-400">
+            {models.length === 0 ? (
+              <>
+                尚未配置任何模型 Provider。
+                <br />
+                点击右上角「设置」添加你的 API 端点与 Key。
+              </>
+            ) : (
+              <>选中模型后开始对话，支持多模型 / 自定义模型。</>
+            )}
+          </div>
         )}
         {messages.map((m, i) => (
           <div key={i} className={m.role === 'user' ? 'text-right' : 'text-left'}>

@@ -39,12 +39,15 @@ async function writeRaw(key: string, value: unknown): Promise<void> {
   memoryFallback.set(key, value);
 }
 
-/** 读取 provider 列表：首次注入预置项，并合并“启用/密钥”等用户态覆盖。 */
+/** 读取 provider 列表：首次启动写入空数组（不预置任何第三方 Provider），后续合并用户自定义项。 */
 export async function getProviders(): Promise<ProviderConfig[]> {
   const stored = await readRaw<ProviderConfig[]>(PROVIDERS_KEY);
-  if (!stored || stored.length === 0) {
+  if (!stored) {
     await writeRaw(PROVIDERS_KEY, BUILTIN_PROVIDERS);
     return structuredClone(BUILTIN_PROVIDERS);
+  }
+  if (stored.length === 0) {
+    return [];
   }
   // 合并预置项的新模型（保证升级后新增预设模型可用），用户自定义项完整保留
   const byId = new Map(stored.map((p) => [p.id, p]));

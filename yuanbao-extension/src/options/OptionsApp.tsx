@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { api } from '@/shared/client';
 import { track } from '@/core/analytics';
+import { DEFAULT_CUSTOM_BASEURL } from '@/core/builtinModels';
 import type { ProviderConfig, ModelEntry } from '@/types/model';
 
 function maskKey(key?: string): string {
@@ -59,7 +60,7 @@ export function OptionsApp() {
       id,
       type: 'custom',
       name: '自定义端点',
-      baseURL: 'https://',
+      baseURL: DEFAULT_CUSTOM_BASEURL,
       apiKey: '',
       enabled: true,
       models: [{ id: id + '-model', label: '自定义模型', providerId: id, capability: ['chat'] }],
@@ -97,10 +98,36 @@ export function OptionsApp() {
 
       <section className="mb-4 flex items-center justify-between">
         <h2 className="font-medium">Provider 列表</h2>
-        <button className="rounded bg-brand px-3 py-1 text-white" onClick={addCustom}>
-          + 新增自定义
-        </button>
+        <div className="flex gap-2">
+          {providers.length > 0 && (
+            <button
+              className="rounded border border-red-200 px-3 py-1 text-xs text-red-500 hover:bg-red-50"
+              onClick={() => {
+                if (confirm('确定清空所有 Provider 配置吗？此操作不可恢复。')) {
+                  setProviders([]);
+                  setDefaultModelId('');
+                  setSaved(false);
+                }
+              }}
+            >
+              清空所有
+            </button>
+          )}
+          <button className="rounded bg-brand px-3 py-1 text-white" onClick={addCustom}>
+            + 新增自定义
+          </button>
+        </div>
       </section>
+
+      {providers.length === 0 && (
+        <div className="mb-4 rounded-lg border border-dashed border-gray-300 p-6 text-center text-sm text-gray-500">
+          <p className="mb-2">还没有 Provider</p>
+          <p className="mb-3 text-xs text-gray-400">本插件默认不预置任何第三方模型。点击下方按钮添加你自己的 OpenAI 兼容端点。</p>
+          <button className="rounded bg-brand px-4 py-1.5 text-white" onClick={addCustom}>
+            + 添加第一个 Provider
+          </button>
+        </div>
+      )}
 
       <div className="space-y-3">
         {providers.map((p) => (
