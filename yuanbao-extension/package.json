@@ -1,0 +1,37 @@
+{
+  "name": "yuanbao-extension",
+  "displayName": "元宝 AI 浏览器助手（增强版）",
+  "version": "0.2.0",
+  "description": "元宝 Chrome 插件增强：支持多模型（混元/DeepSeek/GPT/Claude/Gemini/Qwen/GLM/Kimi/Ollama）与可自定义模型 Provider。",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "build:firefox": "BUILD_TARGET=firefox tsc --noEmit && BUILD_TARGET=firefox vite build",
+    "preview": "vite preview --port 4173 --strictPort",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "e2e": "pkill -f 'vite preview' 2>/dev/null; (npm run preview > /tmp/preview.log 2>&1 &) && sleep 5 && playwright test; pkill -f 'vite preview' 2>/dev/null || true"
+  },
+  "dependencies": {
+    "@mozilla/readability": "^0.5.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "zustand": "^4.5.5"
+  },
+  "devDependencies": {
+    "@crxjs/vite-plugin": "2.0.0-beta.23",
+    "@playwright/test": "^1.48.0",
+    "@types/chrome": "^0.0.270",
+    "@types/react": "^18.3.5",
+    "@types/react-dom": "^18.3.0",
+    "@vitejs/plugin-react": "^4.3.1",
+    "autoprefixer": "^10.4.20",
+    "jsdom": "^25.0.1",
+    "postcss": "^8.4.45",
+    "tailwindcss": "^3.4.10",
+    "typescript": "^5.5.4",
+    "vite": "^5.4.3",
+    "vitest": "^2.0.5"
+  }
+}
