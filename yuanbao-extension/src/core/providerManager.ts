@@ -7,6 +7,7 @@
  */
 import type { ChatChunk, ChatRequest, ModelEntry, ModelProvider, ProviderConfig, TransformRequest } from '@/types/model';
 import { getProviders } from './storage';
+import { track } from './analytics';
 import { YuanBaoProvider } from './providers/yuanbao';
 import { OpenAICompatibleProvider } from './providers/openai';
 import { CustomProvider } from './providers/custom';
@@ -73,6 +74,7 @@ export class ProviderManager {
 
   /** 对话（带一次回退） */
   async *chatWithFallback(req: ChatRequest): AsyncIterable<ChatChunk> {
+    void track('model_used');
     const resolved = this.resolve(req.model);
     if (!resolved) {
       yield { delta: '', error: `未知模型：${req.model}` };
@@ -91,6 +93,7 @@ export class ProviderManager {
     if (errored) {
       const fb = this.fallbackFor((resolved.provider as any).id);
       if (fb) {
+        void track('model_fallback');
         yield { delta: `\n\n[当前模型不可用，已回退至 ${fb.provider.name}]\n` };
         for await (const c of fb.provider.chat({ ...req, model: fb.modelId })) {
           if (c.error) {
@@ -116,7 +119,8 @@ export class ProviderManager {
       yield* this.yuanbaoTransform(req);
       return;
     }
-    // 降级：chat + 专用 prompt
+    // 降级：chat + 专用 prompt（埋点记录降级次数）
+    void track('transform_degraded');
     const prompt =
       req.task === 'translate'
         ? `请将以下内容翻译为${req.targetLang || '中文'}，仅输出译文，不要解释：\n\n${req.text}`

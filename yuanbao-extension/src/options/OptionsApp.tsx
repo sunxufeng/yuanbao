@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { api } from '@/shared/client';
+import { track } from '@/core/analytics';
 import type { ProviderConfig, ModelEntry } from '@/types/model';
 
 function maskKey(key?: string): string {
@@ -42,6 +43,7 @@ export function OptionsApp() {
   async function save() {
     await api.saveProviders(providers);
     if (defaultModel) await api.setDefaultModel(defaultModel);
+    if (providers.some((p) => p.type === 'custom')) void track('custom_provider_saved');
     setSaved(true);
   }
 
@@ -151,6 +153,12 @@ export function OptionsApp() {
                     onClick={() => setShowKey((s) => ({ ...s, [p.id]: !s[p.id] }))}
                   >
                     {showKey[p.id] ? '隐藏' : '显示'}
+                  </button>
+                  <button
+                    className="rounded border border-gray-200 px-2 text-xs text-gray-400"
+                    onClick={() => updateProvider(p.id, { apiKey: '' })}
+                  >
+                    清除
                   </button>
                 </div>
               </label>

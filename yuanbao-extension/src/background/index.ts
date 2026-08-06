@@ -6,8 +6,9 @@
  *  - 注册 commands（翻译选中 / 总结页面），转发到侧边栏或后台处理。
  */
 import type { FromBackground, StreamMessage, ToBackground } from '@/shared/messages';
-import { PORT_NAME } from '@/shared/messages';
+import { PORT_NAME, PENDING_TRANSFORM_KEY, type PendingTransform } from '@/shared/messages';
 import { getManager, ProviderManager } from '@/core/providerManager';
+import { track } from '@/core/analytics';
 import { getProviders, saveProviders, getDefaultModel, setDefaultModel } from '@/core/storage';
 import type { ChatRequest, ProviderConfig, TransformRequest } from '@/types/model';
 import { hasSidePanel, safeChrome } from '@/shared/browserSupport';
@@ -62,6 +63,7 @@ chrome.runtime.onInstalled.addListener(async () => {
     }
     console.info('[yuanbao-extension] installed/updated; defaults seeded', { firefox: false });
   } catch (e) {
+    void track('runtime_error');
     console.warn('[yuanbao-extension] onInstalled error:', (e as Error).message);
   }
 });
@@ -161,6 +163,7 @@ chrome.runtime.onMessage.addListener((msg: ToBackground, sender, sendResponse) =
           sendResponse({ ok: false, error: '未知 action' } as FromBackground);
       }
     } catch (e) {
+      void track('runtime_error');
       sendResponse({ ok: false, error: (e as Error).message } as FromBackground);
     }
   })();
@@ -200,12 +203,51 @@ chrome.runtime.onConnect.addListener((port) => {
   });
 });
 
-// 快捷键命令
-chrome.commands?.onCommand.addListener((command) => {
-  if (command === 'translate_selection' || command === 'summarize_page') {
-    // 实际动作由内容脚本/侧边栏消费；此处仅确保 SW 存活并记录
-    console.info('[yuanbao] command:', command);
+// 快捷键命令：Alt+1 翻译选中 / Alt+2 总结页面（PRD §6）
+// 实际动作：取文本 → 写入待执行任务 → 打开侧边栏，由 ChatPanel 消费并执行 transform。
+chrome.commands?.onCommand.addListener(async (command) => {
+  try {
+    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    if (!tab?.id) return;
+
+    let payload: PendingTransform | null = null;
+    if (command === 'translate_selection') {
+      const text = await sendToContent<string>(tab.id, { action: 'getSelectionText' });
+      payload = { kind: 'translate', text: typeof text === 'string' ? text : '' };
+    } else if (command === 'summarize_page') {
+      const page = await sendToContent<{ text: string; articleText?: string }>(tab.id, { action: 'getPageContent' });
+      const text = page?.articleText || page?.text || '';
+      payload = { kind: 'summarize', text };
+    }
+    if (!payload) return;
+
+    try {
+      await chrome.storage.local.set({ [PENDING_TRANSFORM_KEY]: payload });
+    } catch {
+      /* ignore */
+    }
+    if (hasSidePanel() && tab.id != null) {
+      await safeChrome(() => chrome.sidePanel.open({ tabId: tab.id! }), Promise.resolve());
+    }
+  } catch (e) {
+    void track('runtime_error');
+    console.warn('[yuanbao] command error:', (e as Error).message);
   }
 });
+
+/** 向内容脚本发消息并取回响应（Promise 化 + 吞掉 lastError） */
+function sendToContent<T = unknown>(tabId: number, msg: ToBackground): Promise<T | undefined> {
+  return new Promise((resolve) => {
+    try {
+      chrome.tabs.sendMessage(tabId, msg, (resp: unknown) => {
+        const err = chrome.runtime.lastError;
+        if (err) resolve(undefined);
+        else resolve(resp as T | undefined);
+      });
+    } catch {
+      resolve(undefined);
+    }
+  });
+}
 
 console.info('[yuanbao-extension] background service worker ready');

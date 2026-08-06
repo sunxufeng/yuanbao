@@ -1,5 +1,6 @@
-import { useEffect, useRef, useState } from 'react';
-import { api, streamChat } from '@/shared/client';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { api, streamChat, streamTransform } from '@/shared/client';
+import { PENDING_TRANSFORM_KEY, type PendingTransform } from '@/shared/messages';
 import type { ModelEntry, ContentPart } from '@/types/model';
 
 interface Msg {
@@ -15,14 +16,67 @@ export function ChatPanel() {
   const [busy, setBusy] = useState(false);
   const [pendingImage, setPendingImage] = useState<string | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const modelIdRef = useRef('');
+  const busyRef = useRef(false);
 
   useEffect(() => {
     (async () => {
       const [m, d] = await Promise.all([api.getModels(), api.getDefaultModel()]);
       if (m.ok) setModels(m.models);
-      if (d.ok && d.defaultModel) setModelId(d.defaultModel);
-      else if (m.ok && m.models[0]) setModelId(m.models[0].id);
+      if (d.ok && d.defaultModel) {
+        setModelId(d.defaultModel);
+        modelIdRef.current = d.defaultModel;
+      } else if (m.ok && m.models[0]) {
+        setModelId(m.models[0].id);
+        modelIdRef.current = m.models[0].id;
+      }
     })();
+  }, []);
+
+  const onModelChange = async (id: string) => {
+    setModelId(id);
+    modelIdRef.current = id;
+    await api.setDefaultModel(id);
+  };
+
+  /** 执行翻译/总结（快捷键或划词工具条触发），结果作为一条对话展示 */
+  const runTransform = useCallback(async (kind: 'translate' | 'summarize', text: string) => {
+    if (!text || busyRef.current) return;
+    busyRef.current = true;
+    setBusy(true);
+    setInput(text);
+    // 侧边栏刚打开时模型可能尚未加载完成，兜底取一次默认模型
+    const model = modelIdRef.current || (await api.getDefaultModel()).defaultModel || '';
+    const label = kind === 'translate' ? `翻译：${text}` : `总结：${text}`;
+    setMessages((prev) => [...prev, { role: 'user', content: label }, { role: 'assistant', content: '' }]);
+    let acc = '';
+    try {
+      for await (const c of streamTransform({ task: kind, text, model })) {
+        if (c.type === 'chunk') {
+          acc += c.delta;
+          setMessages((prev) => {
+            const copy = [...prev];
+            copy[copy.length - 1] = { role: 'assistant', content: acc };
+            return copy;
+          });
+        } else if (c.type === 'error') {
+          setMessages((prev) => {
+            const copy = [...prev];
+            copy[copy.length - 1] = { role: 'error', content: c.message };
+            return copy;
+          });
+        }
+      }
+    } catch (e) {
+      setMessages((prev) => {
+        const copy = [...prev];
+        copy[copy.length - 1] = { role: 'error', content: (e as Error).message };
+        return copy;
+      });
+    } finally {
+      busyRef.current = false;
+      setBusy(false);
+    }
   }, []);
 
   useEffect(() => {
@@ -72,14 +126,34 @@ export function ChatPanel() {
     return () => chrome.storage.onChanged.removeListener(onChange);
   }, []);
 
-  const onModelChange = async (id: string) => {
-    setModelId(id);
-    await api.setDefaultModel(id);
-  };
+  // 快捷键命令（Alt+1 翻译选中 / Alt+2 总结页面）：消费待执行任务并自动运行 transform
+  useEffect(() => {
+    const apply = async () => {
+      try {
+        const r = await chrome.storage.local.get(PENDING_TRANSFORM_KEY);
+        const v = r[PENDING_TRANSFORM_KEY] as PendingTransform | undefined;
+        if (v && typeof v.text === 'string') {
+          const kind = v.kind === 'summarize' ? 'summarize' : 'translate';
+          await chrome.storage.local.remove(PENDING_TRANSFORM_KEY);
+          await runTransform(kind, v.text);
+        }
+      } catch {
+        /* ignore */
+      }
+    };
+    void apply();
+    const onChange = (changes: Record<string, chrome.storage.StorageChange>, area: string) => {
+      if (area === 'local' && changes[PENDING_TRANSFORM_KEY]) void apply();
+    };
+    chrome.storage.onChanged.addListener(onChange);
+    return () => chrome.storage.onChanged.removeListener(onChange);
+  }, [runTransform]);
 
   const send = async () => {
     const text = input.trim();
-    if (!text || busy) return;
+    if (!text || busyRef.current) return;
+    busyRef.current = true;
+    setBusy(true);
     const img = pendingImage;
     setInput('');
     setPendingImage(null);
@@ -124,6 +198,7 @@ export function ChatPanel() {
         return copy;
       });
     } finally {
+      busyRef.current = false;
       setBusy(false);
     }
   };

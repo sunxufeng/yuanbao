@@ -17,7 +17,12 @@ export type ToBackground =
   | { action: 'setDefaultModel'; modelId: string }
   | { action: 'askYuanbao'; text: string }
   | { action: 'captureAndAsk'; text?: string }
-  | { action: 'getPageContent' };
+  | { action: 'getPageContent' }
+  | { action: 'getSelectionText' };
+
+/** 快捷键命令待执行的翻译/总结任务（写入 storage.local，由侧边栏消费） */
+export type PendingTransform = { kind: 'translate' | 'summarize'; text: string };
+export const PENDING_TRANSFORM_KEY = 'yb_pending_transform';
 
 /** 后台 → 客户端 的响应 */
 export type FromBackground =

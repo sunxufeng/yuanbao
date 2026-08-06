@@ -35,6 +35,11 @@ if (typeof chrome === 'undefined' || !chrome.runtime?.id) {
       }
       return true;
     }
+    if (msg?.action === 'getSelectionText') {
+      const text = (window.getSelection()?.toString() || '').trim();
+      sendResponse({ ok: true, text });
+      return true;
+    }
     return false;
   });
 
