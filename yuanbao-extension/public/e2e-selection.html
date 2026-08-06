@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="zh">
+  <head>
+    <meta charset="utf-8" />
+    <title>selection fixture</title>
+    <style>
+      body {
+        font: 16px/1.7 sans-serif;
+        margin: 40px;
+        color: #222;
+      }
+      .fake-tooltip {
+        position: fixed;
+        left: 360px;
+        top: 16px;
+        width: 240px;
+        height: 44px;
+        background: #fff;
+        border: 1px solid #ccc;
+        border-radius: 8px;
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        color: #333;
+        z-index: 9999;
+      }
+      #para {
+        width: 480px;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="fake-tooltip">页面已有弹窗（tooltip）</div>
+    <p id="para">
+      这是一段用于测试划词工具条的示例文本。请选中这段文字，验证元宝工具条不会遮挡页面上已经存在的其它弹出框。
+      This is sample text for the selection toolbar collision-avoidance test. 划词后工具条应自动避让上方已有弹窗。
+    </p>
+    <script>
+      window.__selectAndDispatch = () => {
+        const p = document.getElementById('para');
+        const range = document.createRange();
+        range.selectNodeContents(p);
+        const sel = window.getSelection();
+        sel.removeAllRanges();
+        sel.addRange(range);
+        document.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }));
+      };
+    </script>
+  </body>
+</html>
