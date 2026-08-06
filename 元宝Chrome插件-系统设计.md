@@ -300,6 +300,10 @@ interface ModelEntry { id; label; capability: 'chat'|'vision'|'translate'; extIn
   - `src/manifest.firefox.ts` + `vite.config` `BUILD_TARGET` 切换（T10）：Firefox 降级走 popup/sidebar_action。
   - `e2e/options.spec.ts` + `playwright.config.ts`（T11）：真实浏览器 UI 交互验证。
   - `元宝Chrome插件-PRD.md`（T12）：按 EARS 原则 + 标准结构产出，覆盖验收标准 AC1–AC9。
+- **T17 已推送 GitHub（`sunxufeng/yuanbao`，main 分支，单次干净提交含全部 51 文件）**：
+  - 沙箱代理仅放行 `api.github.com`、且 502 拦截 `github.com` 的 git 协议端点（git push 不可达）。
+  - 改用 **GitHub REST API** 推送：空仓库先用 Contents API 逐文件建初始提交，再用 Git Database API（blob→tree→commit→PATCH ref）整理为单次干净提交。
+  - 详见技能 `github-api-push`（沙箱网络受限时的 GitHub 推送方案）。
 - **本轮新增（T13–T16，划词工具条 + 碰撞避让）**：
   - `src/content/selectionToolbar.ts`：划词浮动工具条（复制/翻译/总结/问问元宝），**Shadow DOM 隔离**页面样式。
   - `src/content/positioning.ts`：碰撞避让纯算法 `computeToolbarPlacement`（候选位评分：重叠面积 > 挤出视口位移 > 序位偏好），clamp 进视口。
